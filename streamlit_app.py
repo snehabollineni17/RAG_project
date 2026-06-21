@@ -1,16 +1,19 @@
+import os
+import logging
+
 import streamlit as st
-from langchain_community.chat_message_histories import StreamlitChatMessageHistory
-from langchain_community.embeddings import OpenAIEmbeddings
+from dotenv import load_dotenv
+from langchain_core.output_parsers import StrOutputParser
 
-from ensemble import ensemble_retriever_from_docs
-from full_chain import create_full_chain, ask_question
-from local_loader import load_txt_files
+from ensemble import ensemble_retriever_from_docs, get_model, load_all_pdfs
+from memory import create_memory_chain
+from rag_chain import make_rag_chain
 
-st.set_page_config(page_title="LangChain & Streamlit RAG")
-st.title("LangChain & Streamlit RAG")
+st.set_page_config(page_title="AUTOSAR RAG Assistant")
+st.title("AUTOSAR RAG Assistant")
 
 
-def show_ui(qa, prompt_to_user="How may I help you?"):
+def show_ui(chain, prompt_to_user="How may I help you?"):
     if "messages" not in st.session_state.keys():
         st.session_state.messages = [{"role": "assistant", "content": prompt_to_user}]
 
@@ -29,25 +32,24 @@ def show_ui(qa, prompt_to_user="How may I help you?"):
     if st.session_state.messages[-1]["role"] != "assistant":
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                response = ask_question(qa, prompt)
-                st.markdown(response.content)
-        message = {"role": "assistant", "content": response.content}
+                response = chain.invoke(
+                    {"question": prompt},
+                    config={"configurable": {"session_id": "streamlit-user"}},
+                )
+                st.markdown(response)
+        message = {"role": "assistant", "content": response}
         st.session_state.messages.append(message)
 
 
 @st.cache_resource
-def get_retriever(openai_api_key=None):
-    docs = load_txt_files()
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key, model="text-embedding-3-small")
-    return ensemble_retriever_from_docs(docs, embeddings=embeddings)
-
-
-def get_chain(openai_api_key=None, huggingfacehub_api_token=None):
-    ensemble_retriever = get_retriever(openai_api_key=openai_api_key)
-    chain = create_full_chain(ensemble_retriever,
-                              openai_api_key=openai_api_key,
-                              chat_memory=StreamlitChatMessageHistory(key="langchain_messages"))
-    return chain
+def get_chain(google_api_key):
+    os.environ["GOOGLE_API_KEY"] = google_api_key
+    docs = load_all_pdfs("./data")
+    ensemble_retriever = ensemble_retriever_from_docs(docs)
+    model = get_model()
+    rag_chain = make_rag_chain(model, ensemble_retriever)
+    memory_chain = create_memory_chain(model, rag_chain)
+    return memory_chain | StrOutputParser()
 
 
 def get_secret_or_input(secret_key, secret_name, info_link=None):
@@ -65,32 +67,32 @@ def get_secret_or_input(secret_key, secret_name, info_link=None):
 
 
 def run():
-    ready = True
+    load_dotenv()
 
-    openai_api_key = st.session_state.get("OPENAI_API_KEY")
-    huggingfacehub_api_token = st.session_state.get("HUGGINGFACEHUB_API_TOKEN")
+    google_api_key = st.session_state.get("GOOGLE_API_KEY") or os.environ.get("GOOGLE_API_KEY")
 
     with st.sidebar:
-        if not openai_api_key:
-            openai_api_key = get_secret_or_input('OPENAI_API_KEY', "OpenAI API key",
-                                                 info_link="https://platform.openai.com/account/api-keys")
-        if not huggingfacehub_api_token:
-            huggingfacehub_api_token = get_secret_or_input('HUGGINGFACEHUB_API_TOKEN', "HuggingFace Hub API Token",
-                                                           info_link="https://huggingface.co/docs/huggingface_hub/main/en/quick-start#authentication")
+        if not google_api_key:
+            google_api_key = get_secret_or_input(
+                "GOOGLE_API_KEY",
+                "Google API key",
+                info_link="https://aistudio.google.com/apikey",
+            )
 
-    if not openai_api_key:
-        st.warning("Missing OPENAI_API_KEY")
-        ready = False
-    if not huggingfacehub_api_token:
-        st.warning("Missing HUGGINGFACEHUB_API_TOKEN")
-        ready = False
+    if not google_api_key:
+        st.warning("Missing GOOGLE_API_KEY")
+        st.stop()
 
-    if ready:
-        chain = get_chain(openai_api_key=openai_api_key, huggingfacehub_api_token=huggingfacehub_api_token)
-        st.subheader("Ask me questions about this week's meal plan")
+    try:
+        chain = get_chain(google_api_key)
+        st.subheader("Ask me questions about AUTOSAR?")
         show_ui(chain, "What would you like to know?")
-    else:
+    except Exception as exc:
+        logging.exception("Failed to initialize RAG chain")
+        st.error("Failed to initialize RAG chain")
+        st.exception(exc)
         st.stop()
 
 
-run()
+if __name__ == "__main__":
+    run()
