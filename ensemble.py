@@ -14,7 +14,7 @@ from memory import create_memory_chain
 
 def get_model():
     return ChatGoogleGenerativeAI(
-        model=os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite"),
+        model=os.environ.get("GEMINI_MODEL", "gemini-2-flash"),
         api_key=os.environ.get("GOOGLE_API_KEY"),
         temperature=0
     )
