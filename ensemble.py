@@ -90,10 +90,10 @@ def main():
     while True:
         q = input("You: ")
 
-    result = chain.invoke(
-        {"question": q},
-        config={"configurable": {"session_id": session_id}}
-    )
+        result = chain.invoke(
+            {"question": q},
+            config={"configurable": {"session_id": session_id}}
+        )
 
     print("Bot:", result)
 
